@@ -5,6 +5,10 @@
     "upload_btn": "Upload documents",
     "upload_dialog": "Select ODT/ODS documents",
     "theme_btn": "Light/Dark Theme",
+    "theme_label": "Theme:",
+    "theme_toggle": "Dark",
+    "language_label": "Language:",
+    "language_toggle": "IT/EN",
     "doc_col": "Document",
     "status_col": "Status",
     "status_placeholder": "Pending"

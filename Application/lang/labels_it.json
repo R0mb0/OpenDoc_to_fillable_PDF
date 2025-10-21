@@ -5,6 +5,10 @@
     "upload_btn": "Carica documenti",
     "upload_dialog": "Seleziona documenti ODT/ODS",
     "theme_btn": "Tema Chiaro/Scuro",
+    "theme_label": "Tema:",
+    "theme_toggle": "Scuro",
+    "language_label": "Lingua:",
+    "language_toggle": "IT/EN",
     "doc_col": "Documento",
     "status_col": "Stato",
     "status_placeholder": "In attesa"
