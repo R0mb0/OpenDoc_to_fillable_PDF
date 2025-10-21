@@ -1,0 +1,11 @@
+{
+    "app_title": "Document Converter",
+    "doc_area": "Document Area",
+    "table_title": "Loaded Documents",
+    "upload_btn": "Upload documents",
+    "upload_dialog": "Select ODT/ODS documents",
+    "theme_btn": "Light/Dark Theme",
+    "doc_col": "Document",
+    "status_col": "Status",
+    "status_placeholder": "Pending"
+}

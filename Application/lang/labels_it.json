@@ -1,0 +1,11 @@
+{
+    "app_title": "Document Converter",
+    "doc_area": "Area Documento",
+    "table_title": "Documenti Caricati",
+    "upload_btn": "Carica documenti",
+    "upload_dialog": "Seleziona documenti ODT/ODS",
+    "theme_btn": "Tema Chiaro/Scuro",
+    "doc_col": "Documento",
+    "status_col": "Stato",
+    "status_placeholder": "In attesa"
+}
