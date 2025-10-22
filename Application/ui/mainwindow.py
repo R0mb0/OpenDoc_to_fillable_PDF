@@ -2,9 +2,8 @@
 """
 MainWindow snella che si appoggia sui moduli core/ e ui/.
 Ora applica un stylesheet basato sul tema (dark/light) e carica l'asset toggle_switch.qss.
-Correzione: _set_main_area_visible è stata resa ricorsiva così che tutti i widget nelle
-sottolayout vengano nascosti/mostrati correttamente nella pagina iniziale.
-I pulsanti di navigazione (<, >) restano nascosti finché non viene caricato almeno un documento.
+Gestione toggle lingua/tema: i toggle sono collegati a toggle_language/toggle_theme
+che aggiornano l'interfaccia al volo.
 """
 from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog, QFrame, QSizePolicy
 from PyQt5.QtCore import Qt
@@ -35,6 +34,7 @@ class MainWindow(QMainWindow):
         app_base = Path(__file__).resolve().parent.parent
         self.app_base = app_base
         self.assets_dir = app_base / "assets"
+        self.lang_dir = app_base / "lang"
         self.docmgr = DocumentManager(work_root=str(app_base / "work"))
 
         # UI components
@@ -45,6 +45,13 @@ class MainWindow(QMainWindow):
         self.docmgr.current_changed.connect(self.on_current_changed)
         # preview autosave callback will use docmgr.save_editable_for_current
         self.preview.set_autosave_callback(self._on_preview_autosave)
+
+        # Ensure theme toggle texts reflect labels (if any)
+        theme_on = self.labels.get("theme_on", "Scuro")
+        theme_off = self.labels.get("theme_off", "Chiaro")
+        self.theme_toggle.text_on = theme_on
+        self.theme_toggle.text_off = theme_off
+        self.theme_toggle.setText(self.theme_toggle.text_on if self.theme_toggle.isChecked() else self.theme_toggle.text_off)
 
         # Apply theme stylesheet
         try:
@@ -64,9 +71,20 @@ class MainWindow(QMainWindow):
         # top bar: language + theme toggles
         top = QHBoxLayout()
         self.lang_label = QLabel(self.labels.get("language_label", "Lingua:"))
+        self.lang_label.setFont(QFont("Arial", 11))
+        # lang toggle shows EN / IT (checked == EN)
         self.lang_toggle = ToggleSwitch(text_on="EN", text_off="IT", checked=(self.language=="en"))
+        self.lang_toggle.clicked.connect(self.toggle_language)
+
         self.theme_label = QLabel(self.labels.get("theme_label", "Tema:"))
-        self.theme_toggle = ToggleSwitch(text_on=self.labels.get("theme_on","Scuro"), text_off=self.labels.get("theme_off","Chiaro"), checked=(self.theme=="dark"))
+        self.theme_label.setFont(QFont("Arial", 11))
+        self.theme_toggle = ToggleSwitch(
+            text_on=self.labels.get("theme_on","Scuro"),
+            text_off=self.labels.get("theme_off","Chiaro"),
+            checked=(self.theme=="dark")
+        )
+        self.theme_toggle.clicked.connect(self.toggle_theme)
+
         top.addWidget(self.lang_label)
         top.addWidget(self.lang_toggle)
         top.addSpacing(12)
@@ -124,11 +142,13 @@ class MainWindow(QMainWindow):
 
         # tools column
         tools_col = QVBoxLayout()
-        # placeholder tool buttons
+        # placeholder tool buttons (store references for language updates)
         keys = ["btn_interpret","btn_compile","btn_back","btn_delete","btn_save"]
+        self.tool_buttons = []
         for k in keys:
             b = StyledButton(self.labels.get(k,k))
             tools_col.addWidget(b)
+            self.tool_buttons.append((k, b))
         tools_col.addStretch()
         self.main_area.addLayout(tools_col, 1)
 
@@ -198,7 +218,67 @@ class MainWindow(QMainWindow):
                 QPushButton:hover { background-color: #edf2f7; }
             """
         full = base + "\n" + qss_content
+        # apply to the window (could also apply to QApplication if desired)
         self.setStyleSheet(full)
+
+    def load_labels_from_disk(self, language: str):
+        """
+        Load labels JSON from Application/lang and return dict.
+        Fallback to labels_en.json if missing.
+        """
+        try:
+            lf = self.lang_dir / f"labels_{language}.json"
+            if not lf.exists():
+                lf = self.lang_dir / "labels_en.json"
+            return json.loads(lf.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.exception("Failed to load labels for language %s: %s", language, e)
+            return {}
+
+    def toggle_language(self):
+        """
+        Called when the lang toggle is clicked.
+        Updates self.language, reloads labels, and refreshes UI texts.
+        """
+        # ToggleSwitch is checked==EN in our convention
+        self.language = "en" if self.lang_toggle.isChecked() else "it"
+        new_labels = self.load_labels_from_disk(self.language)
+        if not new_labels:
+            logger.warning("No labels found for language %s", self.language)
+            return
+        self.labels = new_labels
+        # Update top labels and buttons
+        self.lang_label.setText(self.labels.get("language_label", "Lingua:"))
+        self.theme_label.setText(self.labels.get("theme_label", "Tema:"))
+        if hasattr(self, "upload_btn") and self.upload_btn:
+            self.upload_btn.setText(self.labels.get("upload_btn", "Carica documenti"))
+        # Update tool button texts
+        for key, btn in getattr(self, "tool_buttons", []):
+            btn.setText(self.labels.get(key, btn.text()))
+        # Update theme toggle texts if labels changed
+        theme_on = self.labels.get("theme_on", "Scuro")
+        theme_off = self.labels.get("theme_off", "Chiaro")
+        self.theme_toggle.text_on = theme_on
+        self.theme_toggle.text_off = theme_off
+        # refresh displayed text on theme toggle according to its checked state
+        try:
+            self.theme_toggle.setText(self.theme_toggle.text_on if self.theme_toggle.isChecked() else self.theme_toggle.text_off)
+        except Exception:
+            pass
+        # Update title label text (static)
+        self.title_label.setText(self.labels.get("title_label", "Titolo:"))
+
+    def toggle_theme(self):
+        """
+        Called when the theme toggle is clicked.
+        Reads the toggle checked state and applies the selected theme.
+        """
+        self.theme = "dark" if self.theme_toggle.isChecked() else "light"
+        try:
+            self.apply_theme(self.theme)
+            logger.info("Theme switched to %s via toggle", self.theme)
+        except Exception:
+            logger.exception("Failed to apply theme on toggle")
 
     def on_upload_clicked(self):
         files, _ = QFileDialog.getOpenFileNames(self, self.labels.get("upload_dialog","Seleziona documenti ODT/ODS"), "", "Documents (*.odt *.ods)")
@@ -226,7 +306,6 @@ class MainWindow(QMainWindow):
             # navigation buttons make sense only when documents exist: show/enable them
             self.prev_btn.setVisible(True)
             self.next_btn.setVisible(True)
-            # if you want to enable/disable based on index you can do that here
 
     def on_current_changed(self, idx):
         # load current document via extractor and/or editable.txt and set preview text
