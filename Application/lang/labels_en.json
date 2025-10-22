@@ -1,6 +1,8 @@
 {
     "app_title": "Document Converter",
     "doc_area": "Document Area",
+    "preview_label": "Preview",
+    "title_label": "Title:",
     "table_title": "Loaded Documents",
     "upload_btn": "Upload documents",
     "upload_dialog": "Select ODT/ODS documents",
@@ -11,5 +13,10 @@
     "language_toggle": "IT/EN",
     "doc_col": "Document",
     "status_col": "Status",
-    "status_placeholder": "Pending"
+    "status_placeholder": "Pending",
+    "btn_interpret": "Interpret",
+    "btn_compile": "Compile",
+    "btn_back": "Back",
+    "btn_delete": "Delete",
+    "btn_save": "Save"
 }

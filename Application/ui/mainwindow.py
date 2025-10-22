@@ -1,6 +1,7 @@
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QHeaderView, QLabel, QFileDialog
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QListWidget, QListWidgetItem, QTableWidgetItem, QHeaderView, QFileDialog,
+    QTableWidget
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
@@ -19,14 +20,10 @@ class ToggleSwitch(QPushButton):
         self.text_on = text_on
         self.text_off = text_off
         self.setObjectName("toggle_switch")
-        # Slightly larger to match central button's rounded look
         self.setFixedSize(96, 34)
-        # Load QSS for styling if available
         try:
             with open(qss_path, "r", encoding="utf-8") as f:
                 self._qss = f.read()
-                # apply to the widget (also main stylesheet includes this file)
-                # we still set it so the widget renders properly standalone
                 self.setStyleSheet(self._qss)
         except Exception:
             self._qss = ""
@@ -44,13 +41,13 @@ class MainWindow(QMainWindow):
         self.language = language
         self.theme = theme  # "light" or "dark"
         self.document_list = []
+        self.current_index = 0
         self.setWindowTitle(self.labels.get("app_title", "Document Converter"))
         self.setMinimumSize(900, 600)
         self.setStyleSheet(self.get_stylesheet())
         self.init_ui()
 
     def get_stylesheet(self):
-        # Include toggle qss content (if file exists) in returned string so toggles render nicely
         qss_content = ""
         try:
             with open("assets/toggle_switch.qss", "r", encoding="utf-8") as f:
@@ -88,10 +85,8 @@ class MainWindow(QMainWindow):
         top_bar_layout = QHBoxLayout()
         top_bar_layout.setAlignment(Qt.AlignLeft)
 
-        # Keep the label widgets as attributes so they can be updated reliably
         self.lang_label_widget = QLabel(self.labels.get("language_label", "Lingua:"))
         self.lang_label_widget.setFont(QFont("Arial", 11))
-        # Language toggle shows IT or EN
         self.lang_toggle = ToggleSwitch(
             checked=(self.language == "en"),
             text_on="EN", text_off="IT"
@@ -100,7 +95,6 @@ class MainWindow(QMainWindow):
 
         self.theme_label_widget = QLabel(self.labels.get("theme_label", "Tema:"))
         self.theme_label_widget.setFont(QFont("Arial", 11))
-        # Theme toggle uses distinct on/off text from labels (theme_on/theme_off)
         theme_on = self.labels.get("theme_on", "Scuro")
         theme_off = self.labels.get("theme_off", "Chiaro")
         self.theme_toggle = ToggleSwitch(
@@ -110,7 +104,6 @@ class MainWindow(QMainWindow):
         )
         self.theme_toggle.clicked.connect(self.toggle_theme)
 
-        # Add widgets to top bar
         top_bar_layout.addWidget(self.lang_label_widget)
         top_bar_layout.addWidget(self.lang_toggle)
         top_bar_layout.addSpacing(12)
@@ -133,7 +126,7 @@ class MainWindow(QMainWindow):
         self.start_layout.addStretch()
         self.layout_main.addLayout(self.start_layout)
 
-    def show_table_layout(self):
+    def show_app_layout_after_upload(self):
         # Remove start layout items (but keep top bar which is index 0)
         while self.layout_main.count() > 1:
             item = self.layout_main.takeAt(1)
@@ -147,49 +140,126 @@ class MainWindow(QMainWindow):
                     if w:
                         w.setParent(None)
 
-        # Table layout (three columns + table)
+        # Three-column layout: Preview | Titolo | Tools + Document list
         layout_cols = QHBoxLayout()
-        # Colonna 1: area documento (placeholder)
-        col_doc = QVBoxLayout()
-        doc_label = QLabel(self.labels.get("doc_area", "Area Documento"))
-        doc_label.setAlignment(Qt.AlignCenter)
-        col_doc.addWidget(doc_label)
-        col_doc.addStretch()
 
-        # Colonna 2: titolo documento
+        # Colonna 1: Anteprima con barre di navigazione
+        col_preview = QVBoxLayout()
+        preview_bar = QHBoxLayout()
+        self.prev_btn = QPushButton("<")
+        self.next_btn = QPushButton(">")
+        self.prev_btn.setFixedSize(36, 28)
+        self.next_btn.setFixedSize(36, 28)
+        self.prev_btn.clicked.connect(self.on_prev)
+        self.next_btn.clicked.connect(self.on_next)
+        self.page_indicator = QLabel("")
+        self.page_indicator.setAlignment(Qt.AlignCenter)
+        preview_bar.addWidget(self.prev_btn)
+        preview_bar.addWidget(self.page_indicator)
+        preview_bar.addWidget(self.next_btn)
+        col_preview.addLayout(preview_bar)
+
+        # Preview area (placeholder)
+        self.preview_area = QLabel(self.labels.get("preview_label", "Anteprima"))
+        self.preview_area.setAlignment(Qt.AlignCenter)
+        self.preview_area.setStyleSheet("""
+            QLabel { border-radius: 10px; background: rgba(255,255,255,0.03); padding: 12px; min-height: 360px; }
+        """)
+        col_preview.addWidget(self.preview_area)
+        col_preview.addStretch()
+
+        # Colonna 2: Titolo
         col_title = QVBoxLayout()
-        title_label = QLabel(self.labels.get("table_title", "Documenti Caricati"))
-        title_label.setFont(QFont("Arial", 20, QFont.Bold))
-        title_label.setAlignment(Qt.AlignCenter)
+        title_label = QLabel(self.labels.get("title_label", "Titolo:"))
+        title_label.setFont(QFont("Arial", 16, QFont.Bold))
+        self.title_value = QLabel("")  # will show document title
+        self.title_value.setFont(QFont("Arial", 14))
         col_title.addWidget(title_label)
+        col_title.addWidget(self.title_value)
         col_title.addStretch()
 
-        # Colonna 3: pulsanti (upload rimane disponibile)
+        # Colonna 3: Pulsanti verticali + lista documenti (compatta)
         col_tools = QVBoxLayout()
-        col_tools.addWidget(self.upload_btn)
+        # Vertical buttons (placeholders)
+        btn_labels = [
+            self.labels.get("btn_interpret", "Interpreta"),
+            self.labels.get("btn_compile", "Compila"),
+            self.labels.get("btn_back", "Torna indietro"),
+            self.labels.get("btn_delete", "Cancella"),
+            self.labels.get("btn_save", "Salva")
+        ]
+        self.tool_buttons = []
+        for lbl in btn_labels:
+            b = QPushButton(lbl)
+            b.setFixedWidth(120)
+            b.setFixedHeight(36)
+            # Placeholder: no connected action (demo)
+            col_tools.addWidget(b)
+            self.tool_buttons.append(b)
         col_tools.addStretch()
+        # Document list under buttons: compact selection list
+        self.docs_listwidget = QListWidget()
+        self.docs_listwidget.setMaximumWidth(260)
+        self.docs_listwidget.itemSelectionChanged.connect(self.on_doc_selection_changed)
+        col_tools.addWidget(self.docs_listwidget)
 
-        # Tabella multi-documento
-        self.table = QTableWidget(len(self.document_list), 2)
-        self.table.setHorizontalHeaderLabels([self.labels.get("doc_col", "Documento"), self.labels.get("status_col", "Stato")])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.verticalHeader().setVisible(False)
-        for row, f in enumerate(self.document_list):
-            self.table.setItem(row, 0, QTableWidgetItem(os.path.basename(f)))
-            self.table.setItem(row, 1, QTableWidgetItem(self.labels.get("status_placeholder", "In attesa")))
-
-        # Layout finale
-        layout_cols.addLayout(col_doc, 2)
+        # Assemble columns into layout
+        layout_cols.addLayout(col_preview, 3)
         layout_cols.addLayout(col_title, 1)
         layout_cols.addLayout(col_tools, 1)
-        layout_cols.addWidget(self.table, 3)
         self.layout_main.addLayout(layout_cols)
+
+        # Initialize selection
+        if self.document_list:
+            self.populate_doc_list()
+            self.set_selected_index(0)
+        else:
+            self.page_indicator.setText("0/0")
+            self.title_value.setText("")
+
+    def populate_doc_list(self):
+        self.docs_listwidget.clear()
+        for p in self.document_list:
+            item = QListWidgetItem(os.path.basename(p))
+            self.docs_listwidget.addItem(item)
+
+    def set_selected_index(self, idx):
+        if not self.document_list:
+            return
+        self.current_index = max(0, min(idx, len(self.document_list) - 1))
+        # update UI: title, preview placeholder, selection in list
+        basename = os.path.basename(self.document_list[self.current_index])
+        self.title_value.setText(basename)
+        self.preview_area.setText(f"{self.labels.get('preview_label','Anteprima')}\n\n{basename}")
+        self.page_indicator.setText(f"{self.current_index + 1}/{len(self.document_list)}")
+        # select item in listwidget
+        if self.docs_listwidget.count() > self.current_index:
+            self.docs_listwidget.setCurrentRow(self.current_index)
+
+    def on_doc_selection_changed(self):
+        row = self.docs_listwidget.currentRow()
+        if row >= 0:
+            self.set_selected_index(row)
+
+    def on_prev(self):
+        if self.document_list:
+            self.set_selected_index((self.current_index - 1) % len(self.document_list))
+
+    def on_next(self):
+        if self.document_list:
+            self.set_selected_index((self.current_index + 1) % len(self.document_list))
 
     def upload_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, self.labels.get("upload_dialog", "Seleziona documenti ODT/ODS"), "", "Documents (*.odt *.ods)")
         if files:
             self.document_list = files
-            self.show_table_layout()
+            # Hide central upload button as requested
+            try:
+                self.upload_btn.setParent(None)
+            except Exception:
+                pass
+            # Show the app layout after upload
+            self.show_app_layout_after_upload()
 
     def toggle_language(self):
         # Toggle IT/EN
@@ -204,7 +274,9 @@ class MainWindow(QMainWindow):
 
         # Update UI texts
         self.setWindowTitle(self.labels.get("app_title", "Document Converter"))
-        self.upload_btn.setText(self.labels.get("upload_btn", "Carica documenti"))
+        # upload button text if it's still present
+        if hasattr(self, "upload_btn") and self.upload_btn is not None:
+            self.upload_btn.setText(self.labels.get("upload_btn", "Carica documenti"))
 
         # Update theme toggle labels if changed language
         theme_on = self.labels.get("theme_on", "Scuro")
@@ -213,15 +285,22 @@ class MainWindow(QMainWindow):
         self.theme_toggle.text_off = theme_off
         self.theme_toggle.update_text()
 
-        # Update labels on top bar
+        # Update top bar labels
         self.lang_label_widget.setText(self.labels.get("language_label", "Lingua:"))
         self.theme_label_widget.setText(self.labels.get("theme_label", "Tema:"))
 
-        # Update table headers / placeholders if table exists
-        if hasattr(self, "table"):
-            self.table.setHorizontalHeaderLabels([self.labels.get("doc_col", "Documento"), self.labels.get("status_col", "Stato")])
-            for row in range(self.table.rowCount()):
-                self.table.setItem(row, 1, QTableWidgetItem(self.labels.get("status_placeholder", "In attesa")))
+        # Update preview/title/button labels if layout present
+        if hasattr(self, "title_value"):
+            # update title label text
+            # (the label widget showing the static "Titolo:" is not stored, but value updated)
+            pass
+        # Update button labels
+        for i, btn in enumerate(getattr(self, "tool_buttons", [])):
+            # map via keys order: btn_interpret, btn_compile, btn_back, btn_delete, btn_save
+            key_map = ["btn_interpret", "btn_compile", "btn_back", "btn_delete", "btn_save"]
+            k = key_map[i] if i < len(key_map) else None
+            if k:
+                btn.setText(self.labels.get(k, btn.text()))
 
     def toggle_theme(self):
         self.theme = "dark" if self.theme_toggle.isChecked() else "light"
