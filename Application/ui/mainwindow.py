@@ -1,7 +1,6 @@
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QListWidget, QListWidgetItem, QTableWidgetItem, QHeaderView, QFileDialog,
-    QTableWidget
+    QListWidget, QListWidgetItem, QSizePolicy, QFileDialog, QTableWidget
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
@@ -27,6 +26,7 @@ class ToggleSwitch(QPushButton):
                 self.setStyleSheet(self._qss)
         except Exception:
             self._qss = ""
+        self.setFont(QFont("Arial", 10, QFont.Bold))
         self.update_text()
         self.clicked.connect(self.update_text)
 
@@ -54,23 +54,29 @@ class MainWindow(QMainWindow):
                 qss_content = f.read()
         except Exception:
             qss_content = ""
+        # Add some button-specific styles to avoid clipping and give consistent padding
+        extra = """
+        QPushButton { padding: 6px 10px; border-radius: 12px; }
+        QPushButton#arrow_btn { min-width: 44px; min-height: 36px; padding: 0 6px; font-size: 14px; }
+        QPushButton.tool-button { min-width: 140px; min-height: 40px; font-size: 13px; }
+        QListWidget { border-radius: 8px; padding: 4px; }
+        QLabel.preview-area { border-radius: 12px; padding: 16px; }
+        """
         if self.theme == "dark":
             base = """
                 QMainWindow { background-color: #21222e; }
-                QPushButton { background-color: #333347; color: #fff; border-radius: 12px; padding: 8px 16px; font-size: 16px; }
-                QTableWidget { background-color: #28293d; color: #fff; border-radius: 10px; font-size: 15px; }
-                QLabel { color: #fff; font-size: 18px; }
-                QHeaderView::section { background-color: #333347; color: #fff; }
+                QPushButton { background-color: #333347; color: #fff; }
+                QTableWidget { background-color: #28293d; color: #fff; }
+                QLabel { color: #fff; }
             """
         else:
             base = """
                 QMainWindow { background-color: #fafbfe; }
-                QPushButton { background-color: #e2e8f0; color: #333; border-radius: 12px; padding: 8px 16px; font-size: 16px; }
-                QTableWidget { background-color: #f3f3fa; color: #333; border-radius: 10px; font-size: 15px; }
-                QLabel { color: #333; font-size: 18px; }
-                QHeaderView::section { background-color: #e2e8f0; color: #333; }
+                QPushButton { background-color: #e2e8f0; color: #333; }
+                QTableWidget { background-color: #f3f3fa; color: #333; }
+                QLabel { color: #333; }
             """
-        return base + "\n" + qss_content
+        return base + extra + "\n" + qss_content
 
     def init_ui(self):
         self.central_widget = QWidget()
@@ -120,7 +126,7 @@ class MainWindow(QMainWindow):
         self.upload_btn.setFont(QFont("Arial", 18))
         self.upload_btn.clicked.connect(self.upload_files)
         self.upload_btn.setFixedWidth(260)
-        self.upload_btn.setFixedHeight(40)
+        self.upload_btn.setFixedHeight(44)
         self.start_layout.addStretch()
         self.start_layout.addWidget(self.upload_btn, alignment=Qt.AlignCenter)
         self.start_layout.addStretch()
@@ -146,24 +152,36 @@ class MainWindow(QMainWindow):
         # Colonna 1: Anteprima con barre di navigazione
         col_preview = QVBoxLayout()
         preview_bar = QHBoxLayout()
+        # Arrow buttons (bigger, better padding)
         self.prev_btn = QPushButton("<")
+        self.prev_btn.setObjectName("arrow_btn")
         self.next_btn = QPushButton(">")
-        self.prev_btn.setFixedSize(36, 28)
-        self.next_btn.setFixedSize(36, 28)
+        self.next_btn.setObjectName("arrow_btn")
+        self.prev_btn.setFixedSize(48, 36)
+        self.next_btn.setFixedSize(48, 36)
+        self.prev_btn.setFont(QFont("Arial", 14))
+        self.next_btn.setFont(QFont("Arial", 14))
         self.prev_btn.clicked.connect(self.on_prev)
         self.next_btn.clicked.connect(self.on_next)
         self.page_indicator = QLabel("")
         self.page_indicator.setAlignment(Qt.AlignCenter)
+        self.page_indicator.setFixedHeight(28)
         preview_bar.addWidget(self.prev_btn)
-        preview_bar.addWidget(self.page_indicator)
+        preview_bar.addWidget(self.page_indicator, stretch=1)
         preview_bar.addWidget(self.next_btn)
         col_preview.addLayout(preview_bar)
 
-        # Preview area (placeholder)
+        # Preview area (placeholder) — now expanding and large
         self.preview_area = QLabel(self.labels.get("preview_label", "Anteprima"))
+        self.preview_area.setObjectName("preview_area")
+        self.preview_area.setProperty("class", "preview-area")
         self.preview_area.setAlignment(Qt.AlignCenter)
+        self.preview_area.setMinimumHeight(360)
+        self.preview_area.setMinimumWidth(520)
+        self.preview_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # subtle style to look like preview pane
         self.preview_area.setStyleSheet("""
-            QLabel { border-radius: 10px; background: rgba(255,255,255,0.03); padding: 12px; min-height: 360px; }
+            QLabel#preview_area { border-radius: 12px; background: rgba(255,255,255,0.02); padding: 16px; min-height: 360px; }
         """)
         col_preview.addWidget(self.preview_area)
         col_preview.addStretch()
@@ -180,30 +198,31 @@ class MainWindow(QMainWindow):
 
         # Colonna 3: Pulsanti verticali + lista documenti (compatta)
         col_tools = QVBoxLayout()
-        # Vertical buttons (placeholders)
-        btn_labels = [
-            self.labels.get("btn_interpret", "Interpreta"),
-            self.labels.get("btn_compile", "Compila"),
-            self.labels.get("btn_back", "Torna indietro"),
-            self.labels.get("btn_delete", "Cancella"),
-            self.labels.get("btn_save", "Salva")
-        ]
+        # Vertical buttons (placeholders) — bigger so text fits
+        btn_keys = ["btn_interpret", "btn_compile", "btn_back", "btn_delete", "btn_save"]
+        btn_labels = [ self.labels.get(k, k) for k in btn_keys ]
         self.tool_buttons = []
         for lbl in btn_labels:
             b = QPushButton(lbl)
-            b.setFixedWidth(120)
-            b.setFixedHeight(36)
+            b.setObjectName("tool_button")
+            b.setProperty("class", "tool-button")
+            b.setFixedWidth(160)
+            b.setFixedHeight(42)
+            b.setFont(QFont("Arial", 12))
             # Placeholder: no connected action (demo)
             col_tools.addWidget(b)
             self.tool_buttons.append(b)
-        col_tools.addStretch()
-        # Document list under buttons: compact selection list
+            col_tools.addSpacing(6)
+        col_tools.addSpacing(10)
+        # Document list under buttons: bigger and fixed width
         self.docs_listwidget = QListWidget()
-        self.docs_listwidget.setMaximumWidth(260)
+        self.docs_listwidget.setFixedWidth(220)
+        self.docs_listwidget.setMinimumHeight(220)
+        self.docs_listwidget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         self.docs_listwidget.itemSelectionChanged.connect(self.on_doc_selection_changed)
         col_tools.addWidget(self.docs_listwidget)
 
-        # Assemble columns into layout
+        # Assemble columns into layout with good stretch factors
         layout_cols.addLayout(col_preview, 3)
         layout_cols.addLayout(col_title, 1)
         layout_cols.addLayout(col_tools, 1)
@@ -289,18 +308,16 @@ class MainWindow(QMainWindow):
         self.lang_label_widget.setText(self.labels.get("language_label", "Lingua:"))
         self.theme_label_widget.setText(self.labels.get("theme_label", "Tema:"))
 
-        # Update preview/title/button labels if layout present
-        if hasattr(self, "title_value"):
-            # update title label text
-            # (the label widget showing the static "Titolo:" is not stored, but value updated)
-            pass
-        # Update button labels
+        # Update button labels and preview/title if layout present
+        btn_keys = ["btn_interpret", "btn_compile", "btn_back", "btn_delete", "btn_save"]
         for i, btn in enumerate(getattr(self, "tool_buttons", [])):
-            # map via keys order: btn_interpret, btn_compile, btn_back, btn_delete, btn_save
-            key_map = ["btn_interpret", "btn_compile", "btn_back", "btn_delete", "btn_save"]
-            k = key_map[i] if i < len(key_map) else None
+            k = btn_keys[i] if i < len(btn_keys) else None
             if k:
                 btn.setText(self.labels.get(k, btn.text()))
+
+        if hasattr(self, "title_value") and self.document_list:
+            # refresh title and preview texts if necessary
+            self.set_selected_index(self.current_index)
 
     def toggle_theme(self):
         self.theme = "dark" if self.theme_toggle.isChecked() else "light"
