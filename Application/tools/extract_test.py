@@ -33,7 +33,6 @@ def extract_from_odt_by_unzip(odt_path):
         if 'content.xml' not in z.namelist():
             raise RuntimeError("content.xml not found in odt archive")
         with z.open('content.xml') as f:
-            # write to a temp file-like object parsed by ET
             tree = ET.parse(f)
             root = tree.getroot()
             ns = {'text': 'urn:oasis:names:tc:opendocument:xmlns:text:1.0'}
