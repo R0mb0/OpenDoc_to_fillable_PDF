@@ -1,0 +1,21 @@
+/* Toggle Switch Material/iOS Style */
+QPushButton[checkable="true"] {
+    background: #cfd8dc;
+    border-radius: 16px;
+    min-width: 60px;
+    min-height: 28px;
+    padding: 2px 12px;
+    color: #444;
+    font-weight: bold;
+    border: 2px solid #b0bec5;
+    transition: background 0.2s;
+}
+QPushButton[checkable="true"]:checked {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #42a5f5, stop:1 #478ed1);
+    color: #fff;
+    border: 2px solid #1976d2;
+}
+QPushButton[checkable="true"]:hover {
+    border: 2px solid #42a5f5;
+}
