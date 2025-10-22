@@ -11,6 +11,8 @@ import shutil
 import pathlib
 import zipfile
 import xml.etree.ElementTree as ET
+import logging
+import traceback
 
 # Optional odfpy import for basic text extraction from .odt
 try:
@@ -53,16 +55,47 @@ class MainWindow(QMainWindow):
         self.document_list = []
         self.current_index = 0
         self.work_root = pathlib.Path("work")
+        self.work_root.mkdir(parents=True, exist_ok=True)  # ensure exists early for logging
         self.save_debounce_ms = 800
         # QTimer used for debounced autosave
         self._save_timer = QTimer()
         self._save_timer.setSingleShot(True)
         self._save_timer.timeout.connect(self._perform_autosave)
 
+        # setup logger (console + file work/debug.log)
+        self._setup_logger()
+
         self.setWindowTitle(self.labels.get("app_title", "Document Converter"))
         self.setMinimumSize(900, 600)
         self.setStyleSheet(self.get_stylesheet())
         self.init_ui()
+        self.logger.info("MainWindow initialized. odfpy_available=%s", ODFPY_AVAILABLE)
+
+    def _setup_logger(self):
+        self.logger = logging.getLogger("docconv")
+        self.logger.setLevel(logging.DEBUG)
+        # avoid duplicate handlers on re-import
+        if not self.logger.handlers:
+            fh = logging.FileHandler(self.work_root / "debug.log", encoding="utf-8")
+            fh.setLevel(logging.DEBUG)
+            ch = logging.StreamHandler()
+            ch.setLevel(logging.INFO)
+            fmt = logging.Formatter("%(asctime)s %(levelname)s: %(message)s")
+            fh.setFormatter(fmt)
+            ch.setFormatter(fmt)
+            self.logger.addHandler(fh)
+            self.logger.addHandler(ch)
+
+    def _log(self, level, msg, *args):
+        # convenience wrapper
+        if level == "info":
+            self.logger.info(msg, *args)
+        elif level == "debug":
+            self.logger.debug(msg, *args)
+        elif level == "error":
+            self.logger.error(msg, *args)
+        else:
+            self.logger.info(msg, *args)
 
     def get_stylesheet(self):
         qss_content = ""
@@ -145,7 +178,7 @@ class MainWindow(QMainWindow):
         self.upload_btn = QPushButton(self.labels.get("upload_btn", "Carica documenti"))
         self.upload_btn.setFont(QFont("Arial", 18))
         self.upload_btn.clicked.connect(self.upload_files)
-        self.upload_btn.setFixedWidth(240)  # ridotto per pulsante più piccolo
+        self.upload_btn.setFixedWidth(240)
         self.upload_btn.setFixedHeight(44)
         self.start_layout.addStretch()
         self.start_layout.addWidget(self.upload_btn, alignment=Qt.AlignCenter)
@@ -175,7 +208,6 @@ class MainWindow(QMainWindow):
         self.prev_btn.setObjectName("arrow_btn")
         self.next_btn = QPushButton(">")
         self.next_btn.setObjectName("arrow_btn")
-        # dimensioni pulsanti freccia leggermente ridotte, font aumentato
         self.prev_btn.setFixedSize(48, 40)
         self.next_btn.setFixedSize(48, 40)
         self.prev_btn.setFont(QFont("Arial", 18))
@@ -232,9 +264,9 @@ class MainWindow(QMainWindow):
             b = QPushButton(lbl)
             b.setObjectName("tool_button")
             b.setProperty("class", "tool-button")
-            b.setFixedWidth(150)   # leggermente più piccolo
-            b.setFixedHeight(44)   # leggermente più piccolo
-            b.setFont(QFont("Arial", 15))  # font aumentato per leggibilità
+            b.setFixedWidth(150)
+            b.setFixedHeight(44)
+            b.setFont(QFont("Arial", 15))
             col_tools.addWidget(b)
             self.tool_buttons.append(b)
             col_tools.addSpacing(8)
@@ -255,22 +287,33 @@ class MainWindow(QMainWindow):
     def upload_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, self.labels.get("upload_dialog", "Seleziona documenti ODT/ODS"), "", "Documents (*.odt *.ods)")
         if files:
-            # create work root if missing
+            self._log("info", "User selected %d files", len(files))
+            # create work root if missing (already created in __init__, but ensure)
             self.work_root.mkdir(parents=True, exist_ok=True)
             self.document_list = files
             # create per-document work folders and copy original
             for p in self.document_list:
-                ppath = pathlib.Path(p)
-                name = ppath.stem
-                docdir = self.work_root / name
-                docdir.mkdir(parents=True, exist_ok=True)
-                # copy original if not already present
-                dest_orig = docdir / ("input.orig" + ppath.suffix)
-                if not dest_orig.exists():
-                    try:
+                try:
+                    ppath = pathlib.Path(p)
+                    name = ppath.stem
+                    docdir = self.work_root / name
+                    docdir.mkdir(parents=True, exist_ok=True)
+                    # copy original if not already present
+                    dest_orig = docdir / ("input.orig" + ppath.suffix)
+                    if not dest_orig.exists():
                         shutil.copy2(str(ppath), str(dest_orig))
+                        self._log("info", "Copied original '%s' -> '%s'", str(ppath), str(dest_orig))
+                    else:
+                        self._log("debug", "Original already exists: %s", str(dest_orig))
+                    # log size and existence
+                    try:
+                        self._log("debug", "dest_orig.exists=%s size=%s", dest_orig.exists(), dest_orig.stat().st_size if dest_orig.exists() else "n/a")
                     except Exception:
-                        pass
+                        self._log("debug", "Could not stat dest_orig")
+                except Exception as e:
+                    self._log("error", "Error copying file %s: %s", p, str(e))
+                    self._log("debug", traceback.format_exc())
+
             # remove central upload UI
             try:
                 while self.start_layout.count():
@@ -314,7 +357,9 @@ class MainWindow(QMainWindow):
         """
         try:
             with zipfile.ZipFile(str(odt_path), 'r') as z:
+                self._log("debug", "Zip namelist: %s", z.namelist())
                 if 'content.xml' not in z.namelist():
+                    self._log("error", "content.xml not in odt archive")
                     return None
                 with z.open('content.xml') as f:
                     tree = ET.parse(f)
@@ -336,8 +381,11 @@ class MainWindow(QMainWindow):
                         if paragraph:
                             paragraphs.append(paragraph)
                     if paragraphs:
+                        self._log("debug", "Extracted %d paragraphs from content.xml", len(paragraphs))
                         return '\n\n'.join(paragraphs)
-        except Exception:
+        except Exception as e:
+            self._log("error", "Exception while extracting by unzip: %s", str(e))
+            self._log("debug", traceback.format_exc())
             return None
         return None
 
@@ -352,30 +400,35 @@ class MainWindow(QMainWindow):
         Saves extracted text into editable.txt for persistence.
         """
         if not self.document_list:
+            self._log("debug", "_load_editable_for_current called but no document_list")
             return
         epath = self._editable_path(self.current_index)
+        self._log("debug", "Looking for editable at: %s", str(epath))
         if epath.exists():
             try:
                 txt = epath.read_text(encoding="utf-8")
+                self._log("info", "Loaded editable.txt for index %d (len=%d)", self.current_index, len(txt))
                 self.preview_editor.blockSignals(True)
                 self.preview_editor.setPlainText(txt)
                 self.preview_editor.blockSignals(False)
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                self._log("error", "Error reading editable.txt: %s", str(e))
+                self._log("debug", traceback.format_exc())
 
         orig = self._orig_path(self.current_index)
+        self._log("debug", "Original path: %s exists=%s", str(orig), orig.exists())
         extracted_text = None
 
         # Try odfpy first (if installed)
         if orig.exists() and ODFPY_AVAILABLE and orig.suffix.lower() == ".odt":
             try:
+                self._log("debug", "Trying odfpy extraction for %s", str(orig))
                 doc = odf_load(str(orig))
                 paragraphs = []
                 for p in doc.getElementsByType(odf_text.P):
                     text_content = ""
                     for n in p.childNodes:
-                        # TEXT_NODE is numerically 3 usually, but better to check attribute
                         try:
                             if getattr(n, "nodeType", None) == n.TEXT_NODE:
                                 text_content += n.data
@@ -384,7 +437,6 @@ class MainWindow(QMainWindow):
                             elif hasattr(n, "data"):
                                 text_content += str(n.data)
                         except Exception:
-                            # best-effort: try to convert to string
                             try:
                                 text_content += str(n)
                             except Exception:
@@ -393,12 +445,20 @@ class MainWindow(QMainWindow):
                         paragraphs.append(text_content.strip())
                 if paragraphs:
                     extracted_text = "\n\n".join(paragraphs)
-            except Exception:
+                    self._log("info", "odfpy extracted %d paragraphs", len(paragraphs))
+            except Exception as e:
+                self._log("error", "odfpy extraction failed: %s", str(e))
+                self._log("debug", traceback.format_exc())
                 extracted_text = None
 
         # Fallback: unzip and parse content.xml directly (works even if odfpy missing)
         if extracted_text is None and orig.exists() and orig.suffix.lower() == ".odt":
+            self._log("debug", "Attempting fallback unzip parsing for %s", str(orig))
             extracted_text = self._extract_text_from_odt_by_unzip(orig)
+            if extracted_text:
+                self._log("info", "Fallback unzip extraction succeeded (len=%d)", len(extracted_text))
+            else:
+                self._log("warning", "Fallback unzip extraction returned no content")
 
         # If we have extracted text, populate editor and save
         if extracted_text:
@@ -410,19 +470,24 @@ class MainWindow(QMainWindow):
                 try:
                     epath.parent.mkdir(parents=True, exist_ok=True)
                     epath.write_text(extracted_text, encoding="utf-8")
-                except Exception:
-                    pass
+                    self._log("debug", "Saved extracted text to %s", str(epath))
+                except Exception as e:
+                    self._log("error", "Failed to save extracted text: %s", str(e))
+                    self._log("debug", traceback.format_exc())
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                self._log("error", "Error populating preview editor: %s", str(e))
+                self._log("debug", traceback.format_exc())
 
         # Final fallback: placeholder with filename
         try:
             self.preview_editor.blockSignals(True)
             self.preview_editor.setPlainText(f"{self.labels.get('preview_label','Anteprima')}\n\n{os.path.basename(self.document_list[self.current_index])}")
             self.preview_editor.blockSignals(False)
-        except Exception:
-            pass
+            self._log("info", "Showed placeholder in preview")
+        except Exception as e:
+            self._log("error", "Error setting placeholder: %s", str(e))
+            self._log("debug", traceback.format_exc())
 
     def on_prev(self):
         if self.document_list:
@@ -446,8 +511,10 @@ class MainWindow(QMainWindow):
             content = self.preview_editor.toPlainText()
             epath.write_text(content, encoding="utf-8")
             self._show_saved_indicator()
-        except Exception:
-            pass
+            self._log("debug", "Autosaved editable.txt for index %d (len=%d)", idx, len(content))
+        except Exception as e:
+            self._log("error", "Autosave failed: %s", str(e))
+            self._log("debug", traceback.format_exc())
 
     def _show_saved_indicator(self):
         self.save_status_label.setText(self.labels.get("status_saved", "Salvato"))
