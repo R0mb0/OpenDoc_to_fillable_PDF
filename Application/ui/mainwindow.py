@@ -10,7 +10,7 @@ import os
 class ToggleSwitch(QPushButton):
     """
     Toggle implemented as a checkable QPushButton with custom QSS.
-    Displays a short label for ON/OFF (text_on/text_off).
+    Shows a short label for ON/OFF (text_on/text_off) and styled as rounded pill.
     """
     def __init__(self, checked=False, text_on="", text_off="", qss_path="assets/toggle_switch.qss", parent=None):
         super().__init__(parent)
@@ -19,12 +19,14 @@ class ToggleSwitch(QPushButton):
         self.text_on = text_on
         self.text_off = text_off
         self.setObjectName("toggle_switch")
-        self.setFixedSize(72, 28)
+        # Slightly larger to match central button's rounded look
+        self.setFixedSize(96, 34)
         # Load QSS for styling if available
         try:
             with open(qss_path, "r", encoding="utf-8") as f:
                 self._qss = f.read()
-                # apply to the widget (will also be included in main stylesheet)
+                # apply to the widget (also main stylesheet includes this file)
+                # we still set it so the widget renders properly standalone
                 self.setStyleSheet(self._qss)
         except Exception:
             self._qss = ""
@@ -98,7 +100,7 @@ class MainWindow(QMainWindow):
 
         self.theme_label_widget = QLabel(self.labels.get("theme_label", "Tema:"))
         self.theme_label_widget.setFont(QFont("Arial", 11))
-        # Theme toggle uses distinct on/off text from labels
+        # Theme toggle uses distinct on/off text from labels (theme_on/theme_off)
         theme_on = self.labels.get("theme_on", "Scuro")
         theme_off = self.labels.get("theme_off", "Chiaro")
         self.theme_toggle = ToggleSwitch(
@@ -133,7 +135,6 @@ class MainWindow(QMainWindow):
 
     def show_table_layout(self):
         # Remove start layout items (but keep top bar which is index 0)
-        # Clear everything after the top bar (index 0)
         while self.layout_main.count() > 1:
             item = self.layout_main.takeAt(1)
             if item is None:
