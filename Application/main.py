@@ -1,13 +1,13 @@
 import sys
 import locale
 import json
+import subprocess
 from pathlib import Path
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QPalette, QColor
 from utils.logging import setup_logger
 import logging
 
-# UI import deferred until after logger setup
 def detect_language():
     lang, _ = locale.getdefaultlocale()
     if lang and lang.startswith("it"):
@@ -30,18 +30,43 @@ def luminance_from_color(qcolor: QColor) -> float:
     return lum * 255
 
 def detect_theme(app: QApplication) -> str:
-    import sys
+    """
+    Platform-aware theme detection:
+      - Windows: read registry AppsUseLightTheme (0 = dark, 1 = light)
+      - macOS: defaults read AppleInterfaceStyle (Dark)
+      - Fallback: Qt palette luminance
+    """
     try:
-        from PyQt5.QtGui import QPalette
-        palette = app.palette()
-        bg = palette.color(QPalette.Window)
-        lum = luminance_from_color(bg)
-        return "dark" if lum < 128 else "light"
+        if sys.platform == "win32":
+            try:
+                import winreg
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                     r"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+                val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+                winreg.CloseKey(key)
+                return "light" if val == 1 else "dark"
+            except Exception:
+                # fallback to palette
+                pass
+        elif sys.platform == "darwin":
+            try:
+                p = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True, text=True)
+                if p.returncode == 0 and "Dark" in p.stdout:
+                    return "dark"
+            except Exception:
+                pass
+        # fallback: Qt palette luminance
+        try:
+            palette = app.palette()
+            bg = palette.color(QPalette.Window)
+            lum = luminance_from_color(bg)
+            return "dark" if lum < 128 else "light"
+        except Exception:
+            return "light"
     except Exception:
         return "light"
 
 def load_labels(language):
-    # Resolve path relative to this file to be robust to cwd
     base = Path(__file__).resolve().parent
     lang_file = base / "lang" / f"labels_{language}.json"
     if not lang_file.exists():
@@ -49,15 +74,12 @@ def load_labels(language):
     try:
         return json.loads(lang_file.read_text(encoding="utf-8"))
     except Exception:
-        # fallback to a minimal dictionary to avoid crashes
         try:
             return json.loads((base / "lang" / "labels_en.json").read_text(encoding="utf-8"))
         except Exception:
             return {}
 
 if __name__ == "__main__":
-    # Prepare application and central logger
-    # Create QApplication early so detect_theme can inspect palette
     app = QApplication(sys.argv)
 
     # Setup logger (writes to Application/work/debug.log)

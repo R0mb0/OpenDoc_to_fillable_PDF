@@ -1,7 +1,7 @@
 # Application/ui/mainwindow.py
 """
 MainWindow snella che si appoggia sui moduli core/ e ui/.
-Usa il logger centrale configurato in Application/main.py (utils.logging).
+Ora applica un stylesheet basato sul tema (dark/light) e carica l'asset toggle_switch.qss.
 """
 from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog, QFrame, QSizePolicy
 from PyQt5.QtCore import Qt
@@ -9,6 +9,7 @@ from PyQt5.QtGui import QFont
 import json
 import os
 import logging
+from pathlib import Path
 
 from core.document_manager import DocumentManager
 from core import extractor
@@ -27,7 +28,11 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 600)
 
         # core components
-        self.docmgr = DocumentManager(work_root="Application/work")
+        # keep work path under Application/work for consistency
+        app_base = Path(__file__).resolve().parent.parent
+        self.app_base = app_base
+        self.assets_dir = app_base / "assets"
+        self.docmgr = DocumentManager(work_root=str(app_base / "work"))
 
         # UI components
         self._build_ui()
@@ -37,6 +42,13 @@ class MainWindow(QMainWindow):
         self.docmgr.current_changed.connect(self.on_current_changed)
         # preview autosave callback will use docmgr.save_editable_for_current
         self.preview.set_autosave_callback(self._on_preview_autosave)
+
+        # Apply theme stylesheet
+        try:
+            self.apply_theme(self.theme)
+            logger.info("Applied theme: %s", self.theme)
+        except Exception:
+            logger.exception("Failed to apply theme")
 
         logger.info("MainWindow initialized")
 
@@ -130,6 +142,38 @@ class MainWindow(QMainWindow):
                 w = item.widget()
                 if w:
                     w.setVisible(visible)
+
+    def apply_theme(self, theme: str):
+        """
+        Apply stylesheet for 'dark' or 'light'.
+        Reads toggle qss from assets and composes a base stylesheet.
+        """
+        qss_content = ""
+        try:
+            qss_file = self.assets_dir / "toggle_switch.qss"
+            if qss_file.exists():
+                qss_content = qss_file.read_text(encoding="utf-8")
+        except Exception:
+            logger.exception("Failed reading toggle qss")
+
+        if theme == "dark":
+            base = """
+                QMainWindow { background-color: #21222e; color: #fff; }
+                QPushButton { background-color: #333347; color: #fff; border-radius: 12px; padding: 8px 16px; }
+                QTextEdit { background-color: #f8f8fa; color: #111; border-radius: 8px; }
+                QLabel { color: #fff; }
+                QPushButton:hover { background-color: #3f4050; }
+            """
+        else:
+            base = """
+                QMainWindow { background-color: #fafbfe; color: #111; }
+                QPushButton { background-color: #e2e8f0; color: #333; border-radius: 12px; padding: 8px 16px; }
+                QTextEdit { background-color: #ffffff; color: #111; border-radius: 8px; }
+                QLabel { color: #333; }
+                QPushButton:hover { background-color: #edf2f7; }
+            """
+        full = base + "\n" + qss_content
+        self.setStyleSheet(full)
 
     def on_upload_clicked(self):
         files, _ = QFileDialog.getOpenFileNames(self, self.labels.get("upload_dialog","Seleziona documenti ODT/ODS"), "", "Documents (*.odt *.ods)")
