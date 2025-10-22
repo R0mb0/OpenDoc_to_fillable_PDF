@@ -39,6 +39,8 @@ class ToggleSwitch(QPushButton):
         except Exception:
             self._qss = ""
         self.setFont(QFont("Arial", 10, QFont.Bold))
+        # set pointing hand cursor to indicate clickable
+        self.setCursor(Qt.PointingHandCursor)
         self.update_text()
         self.clicked.connect(self.update_text)
 
@@ -105,17 +107,22 @@ class MainWindow(QMainWindow):
         except Exception:
             qss_content = ""
         extra = """
+        /* general button hover - lightens background slightly */
         QPushButton { padding: 8px 12px; border-radius: 12px; }
+        QPushButton:hover { /* generic hover, overridden by theme below */ }
         QPushButton#arrow_btn { min-width: 48px; min-height: 40px; padding: 0 10px; font-size: 18px; border-radius: 12px; }
         QPushButton.tool-button { min-width: 150px; min-height: 44px; font-size: 15px; border-radius: 14px; padding: 8px 12px; }
         QTextEdit#preview_editor { border-radius: 12px; background: #ffffff; padding: 12px; }
         QLabel.preview-area-placeholder { color: rgba(0,0,0,0.6); }
         QLabel#save_status { font-size: 11px; color: #8fb; padding-left: 6px; }
         """
+        # theme specific hover colors for clarity
         if self.theme == "dark":
             base = """
                 QMainWindow { background-color: #21222e; }
                 QPushButton { background-color: #333347; color: #fff; }
+                QPushButton:hover { background-color: #3f4050; } /* slightly lighter */
+                QPushButton:pressed { background-color: #2e2f3b; } /* pressed */
                 QTextEdit { color: #222; background: #fefefe; }
                 QLabel { color: #fff; }
             """
@@ -123,6 +130,8 @@ class MainWindow(QMainWindow):
             base = """
                 QMainWindow { background-color: #fafbfe; }
                 QPushButton { background-color: #e2e8f0; color: #333; }
+                QPushButton:hover { background-color: #edf2f7; } /* slightly lighter */
+                QPushButton:pressed { background-color: #d8e2ec; } /* pressed */
                 QTextEdit { color: #111; background: #ffffff; }
                 QLabel { color: #333; }
             """
@@ -178,8 +187,10 @@ class MainWindow(QMainWindow):
         self.upload_btn = QPushButton(self.labels.get("upload_btn", "Carica documenti"))
         self.upload_btn.setFont(QFont("Arial", 18))
         self.upload_btn.clicked.connect(self.upload_files)
-        self.upload_btn.setFixedWidth(240)
+        self.upload_btn.setFixedWidth(240)  # ridotto per pulsante più piccolo
         self.upload_btn.setFixedHeight(44)
+        # set pointing-hand cursor
+        self.upload_btn.setCursor(Qt.PointingHandCursor)
         self.start_layout.addStretch()
         self.start_layout.addWidget(self.upload_btn, alignment=Qt.AlignCenter)
         self.start_layout.addStretch()
@@ -206,14 +217,18 @@ class MainWindow(QMainWindow):
         preview_bar = QHBoxLayout()
         self.prev_btn = QPushButton("<")
         self.prev_btn.setObjectName("arrow_btn")
+        self.prev_btn.setFixedSize(48, 40)
+        self.prev_btn.setFont(QFont("Arial", 18))
+        self.prev_btn.clicked.connect(self.on_prev)
+        self.prev_btn.setCursor(Qt.PointingHandCursor)
+
         self.next_btn = QPushButton(">")
         self.next_btn.setObjectName("arrow_btn")
-        self.prev_btn.setFixedSize(48, 40)
         self.next_btn.setFixedSize(48, 40)
-        self.prev_btn.setFont(QFont("Arial", 18))
         self.next_btn.setFont(QFont("Arial", 18))
-        self.prev_btn.clicked.connect(self.on_prev)
         self.next_btn.clicked.connect(self.on_next)
+        self.next_btn.setCursor(Qt.PointingHandCursor)
+
         self.page_indicator = QLabel("")
         self.page_indicator.setAlignment(Qt.AlignCenter)
         self.page_indicator.setFixedHeight(28)
@@ -264,9 +279,10 @@ class MainWindow(QMainWindow):
             b = QPushButton(lbl)
             b.setObjectName("tool_button")
             b.setProperty("class", "tool-button")
-            b.setFixedWidth(150)
-            b.setFixedHeight(44)
-            b.setFont(QFont("Arial", 15))
+            b.setFixedWidth(150)   # leggermente più piccolo
+            b.setFixedHeight(44)   # leggermente più piccolo
+            b.setFont(QFont("Arial", 15))  # font aumentato per leggibilità
+            b.setCursor(Qt.PointingHandCursor)
             col_tools.addWidget(b)
             self.tool_buttons.append(b)
             col_tools.addSpacing(8)

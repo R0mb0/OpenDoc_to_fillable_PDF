@@ -10,14 +10,27 @@ QPushButton#toggle_switch {
     border: 1px solid #cfd8dd;
     text-align: center;
 }
+QPushButton#toggle_switch:hover {
+    /* subtle lightening on hover */
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #f1f6fb, stop:1 #e9f1f8);
+    border-color: #a9c4e6;
+    color: #111;
+}
 QPushButton#toggle_switch:checked {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 #42a5f5, stop:1 #2b7fc8);
     color: #fff;
     border: 1px solid #1976d2;
 }
+QPushButton#toggle_switch:checked:hover {
+    /* slightly lighter gradient when hovered in checked state */
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #63b6ff, stop:1 #3a8fe0);
+    border-color: #1e6fc5;
+}
 QPushButton#toggle_switch:hover {
-    border-color: #6faaf0;
+    cursor: pointer; /* some Qt versions respect this; code also sets cursor */
 }
 QPushButton#toggle_switch:focus {
     outline: none;
