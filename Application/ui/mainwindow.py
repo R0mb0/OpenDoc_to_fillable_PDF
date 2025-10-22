@@ -1,17 +1,25 @@
+# ui/mainwindow.py
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QListWidget, QListWidgetItem, QSizePolicy, QFileDialog, QTableWidget
+    QListWidget, QListWidgetItem, QSizePolicy, QFileDialog, QTextEdit, QFrame
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 import json
 import os
+import shutil
+import pathlib
+
+# Optional odfpy import for basic text extraction from .odt
+try:
+    from odf.opendocument import load as odf_load
+    from odf import text as odf_text
+    ODFPY_AVAILABLE = True
+except Exception:
+    ODFPY_AVAILABLE = False
+
 
 class ToggleSwitch(QPushButton):
-    """
-    Toggle implemented as a checkable QPushButton with custom QSS.
-    Shows a short label for ON/OFF (text_on/text_off) and styled as rounded pill.
-    """
     def __init__(self, checked=False, text_on="", text_off="", qss_path="assets/toggle_switch.qss", parent=None):
         super().__init__(parent)
         self.setCheckable(True)
@@ -42,6 +50,13 @@ class MainWindow(QMainWindow):
         self.theme = theme  # "light" or "dark"
         self.document_list = []
         self.current_index = 0
+        self.work_root = pathlib.Path("work")
+        self.save_debounce_ms = 800
+        # QTimer used for debounced autosave
+        self._save_timer = QTimer()
+        self._save_timer.setSingleShot(True)
+        self._save_timer.timeout.connect(self._perform_autosave)
+
         self.setWindowTitle(self.labels.get("app_title", "Document Converter"))
         self.setMinimumSize(900, 600)
         self.setStyleSheet(self.get_stylesheet())
@@ -54,27 +69,30 @@ class MainWindow(QMainWindow):
                 qss_content = f.read()
         except Exception:
             qss_content = ""
-        # Add some button-specific styles to avoid clipping and give consistent padding
         extra = """
         QPushButton { padding: 6px 10px; border-radius: 12px; }
-        QPushButton#arrow_btn { min-width: 44px; min-height: 36px; padding: 0 6px; font-size: 14px; }
-        QPushButton.tool-button { min-width: 140px; min-height: 40px; font-size: 13px; }
-        QListWidget { border-radius: 8px; padding: 4px; }
-        QLabel.preview-area { border-radius: 12px; padding: 16px; }
+        QPushButton#arrow_btn { min-width: 48px; min-height: 36px; padding: 0 8px; font-size: 14px; border-radius: 12px; }
+        QPushButton.tool-button { min-width: 160px; min-height: 40px; font-size: 11px; border-radius: 12px; }
+        QListWidget { border-radius: 8px; padding: 4px; background: #ffffff; }
+        QTextEdit#preview_editor { border-radius: 12px; background: #ffffff; padding: 12px; }
+        QLabel.preview-area-placeholder { color: rgba(0,0,0,0.6); }
+        QLabel#save_status { font-size: 11px; color: #8fb; padding-left: 6px; }
         """
         if self.theme == "dark":
             base = """
                 QMainWindow { background-color: #21222e; }
                 QPushButton { background-color: #333347; color: #fff; }
-                QTableWidget { background-color: #28293d; color: #fff; }
+                QTextEdit { color: #222; background: #fefefe; }
                 QLabel { color: #fff; }
+                QListWidget { background: #ffffff; color: #111; }
             """
         else:
             base = """
                 QMainWindow { background-color: #fafbfe; }
                 QPushButton { background-color: #e2e8f0; color: #333; }
-                QTableWidget { background-color: #f3f3fa; color: #333; }
+                QTextEdit { color: #111; background: #ffffff; }
                 QLabel { color: #333; }
+                QListWidget { background: #ffffff; color: #111; }
             """
         return base + extra + "\n" + qss_content
 
@@ -87,7 +105,6 @@ class MainWindow(QMainWindow):
         self.init_start_layout()
 
     def init_top_bar(self):
-        # Sticky top bar for theme/language toggles (top-left)
         top_bar_layout = QHBoxLayout()
         top_bar_layout.setAlignment(Qt.AlignLeft)
 
@@ -115,15 +132,19 @@ class MainWindow(QMainWindow):
         top_bar_layout.addSpacing(12)
         top_bar_layout.addWidget(self.theme_label_widget)
         top_bar_layout.addWidget(self.theme_toggle)
-        top_bar_layout.addStretch()
 
+        # small save-status label (empty until saved)
+        self.save_status_label = QLabel("")
+        self.save_status_label.setObjectName("save_status")
+        top_bar_layout.addWidget(self.save_status_label)
+
+        top_bar_layout.addStretch()
         self.layout_main.addLayout(top_bar_layout)
 
     def init_start_layout(self):
-        # Central upload button only (toggles remain sticky up-left)
         self.start_layout = QVBoxLayout()
         self.upload_btn = QPushButton(self.labels.get("upload_btn", "Carica documenti"))
-        self.upload_btn.setFont(QFont("Arial", 18))
+        self.upload_btn.setFont(QFont("Arial", 16))
         self.upload_btn.clicked.connect(self.upload_files)
         self.upload_btn.setFixedWidth(260)
         self.upload_btn.setFixedHeight(44)
@@ -146,13 +167,11 @@ class MainWindow(QMainWindow):
                     if w:
                         w.setParent(None)
 
-        # Three-column layout: Preview | Titolo | Tools + Document list
         layout_cols = QHBoxLayout()
 
         # Colonna 1: Anteprima con barre di navigazione
         col_preview = QVBoxLayout()
         preview_bar = QHBoxLayout()
-        # Arrow buttons (bigger, better padding)
         self.prev_btn = QPushButton("<")
         self.prev_btn.setObjectName("arrow_btn")
         self.next_btn = QPushButton(">")
@@ -171,19 +190,27 @@ class MainWindow(QMainWindow):
         preview_bar.addWidget(self.next_btn)
         col_preview.addLayout(preview_bar)
 
-        # Preview area (placeholder) — now expanding and large
-        self.preview_area = QLabel(self.labels.get("preview_label", "Anteprima"))
-        self.preview_area.setObjectName("preview_area")
-        self.preview_area.setProperty("class", "preview-area")
-        self.preview_area.setAlignment(Qt.AlignCenter)
-        self.preview_area.setMinimumHeight(360)
-        self.preview_area.setMinimumWidth(520)
-        self.preview_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        # subtle style to look like preview pane
-        self.preview_area.setStyleSheet("""
-            QLabel#preview_area { border-radius: 12px; background: rgba(255,255,255,0.02); padding: 16px; min-height: 360px; }
-        """)
-        col_preview.addWidget(self.preview_area)
+        # Preview frame with QTextEdit inside (editable)
+        self.preview_frame = QFrame()
+        self.preview_frame.setObjectName("preview_frame")
+        self.preview_frame.setStyleSheet("QFrame#preview_frame { border-radius: 12px; }")
+        self.preview_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        preview_layout = QVBoxLayout()
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.preview_editor = QTextEdit()
+        self.preview_editor.setObjectName("preview_editor")
+        self.preview_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.preview_editor.setAcceptRichText(False)  # plain text editing for now
+        self.preview_editor.textChanged.connect(self._on_preview_text_changed)
+
+        # placeholder initial content
+        self.preview_editor.setPlainText(f"{self.labels.get('preview_label','Anteprima')}\n\n")
+        preview_layout.addWidget(self.preview_editor)
+        self.preview_frame.setLayout(preview_layout)
+        self.preview_frame.setMinimumHeight(360)
+        self.preview_frame.setMinimumWidth(520)
+        col_preview.addWidget(self.preview_frame)
         col_preview.addStretch()
 
         # Colonna 2: Titolo
@@ -198,7 +225,6 @@ class MainWindow(QMainWindow):
 
         # Colonna 3: Pulsanti verticali + lista documenti (compatta)
         col_tools = QVBoxLayout()
-        # Vertical buttons (placeholders) — bigger so text fits
         btn_keys = ["btn_interpret", "btn_compile", "btn_back", "btn_delete", "btn_save"]
         btn_labels = [ self.labels.get(k, k) for k in btn_keys ]
         self.tool_buttons = []
@@ -207,14 +233,13 @@ class MainWindow(QMainWindow):
             b.setObjectName("tool_button")
             b.setProperty("class", "tool-button")
             b.setFixedWidth(160)
-            b.setFixedHeight(42)
-            b.setFont(QFont("Arial", 12))
-            # Placeholder: no connected action (demo)
+            b.setFixedHeight(40)
+            b.setFont(QFont("Arial", 11))
             col_tools.addWidget(b)
             self.tool_buttons.append(b)
             col_tools.addSpacing(6)
         col_tools.addSpacing(10)
-        # Document list under buttons: bigger and fixed width
+
         self.docs_listwidget = QListWidget()
         self.docs_listwidget.setFixedWidth(220)
         self.docs_listwidget.setMinimumHeight(220)
@@ -222,19 +247,51 @@ class MainWindow(QMainWindow):
         self.docs_listwidget.itemSelectionChanged.connect(self.on_doc_selection_changed)
         col_tools.addWidget(self.docs_listwidget)
 
-        # Assemble columns into layout with good stretch factors
         layout_cols.addLayout(col_preview, 3)
         layout_cols.addLayout(col_title, 1)
         layout_cols.addLayout(col_tools, 1)
         self.layout_main.addLayout(layout_cols)
 
-        # Initialize selection
         if self.document_list:
             self.populate_doc_list()
             self.set_selected_index(0)
         else:
             self.page_indicator.setText("0/0")
             self.title_value.setText("")
+
+    def upload_files(self):
+        files, _ = QFileDialog.getOpenFileNames(self, self.labels.get("upload_dialog", "Seleziona documenti ODT/ODS"), "", "Documents (*.odt *.ods)")
+        if files:
+            # create work root if missing
+            self.work_root.mkdir(parents=True, exist_ok=True)
+            self.document_list = files
+            # create per-document work folders and copy original
+            for p in self.document_list:
+                ppath = pathlib.Path(p)
+                name = ppath.stem
+                docdir = self.work_root / name
+                docdir.mkdir(parents=True, exist_ok=True)
+                # copy original if not already present
+                dest_orig = docdir / ("input.orig" + ppath.suffix)
+                if not dest_orig.exists():
+                    try:
+                        shutil.copy2(str(ppath), str(dest_orig))
+                    except Exception:
+                        pass
+            # remove central upload UI
+            try:
+                while self.start_layout.count():
+                    it = self.start_layout.takeAt(0)
+                    if it and it.widget():
+                        it.widget().setParent(None)
+                self.start_layout.setParent(None)
+                delattr(self, "start_layout")
+            except Exception:
+                try:
+                    self.upload_btn.setParent(None)
+                except Exception:
+                    pass
+            self.show_app_layout_after_upload()
 
     def populate_doc_list(self):
         self.docs_listwidget.clear()
@@ -246,14 +303,68 @@ class MainWindow(QMainWindow):
         if not self.document_list:
             return
         self.current_index = max(0, min(idx, len(self.document_list) - 1))
-        # update UI: title, preview placeholder, selection in list
         basename = os.path.basename(self.document_list[self.current_index])
         self.title_value.setText(basename)
-        self.preview_area.setText(f"{self.labels.get('preview_label','Anteprima')}\n\n{basename}")
         self.page_indicator.setText(f"{self.current_index + 1}/{len(self.document_list)}")
-        # select item in listwidget
         if self.docs_listwidget.count() > self.current_index:
             self.docs_listwidget.setCurrentRow(self.current_index)
+        # load editable content for this document
+        self._load_editable_for_current()
+
+    def _doc_workdir(self, index):
+        ppath = pathlib.Path(self.document_list[index])
+        return self.work_root / ppath.stem
+
+    def _editable_path(self, index):
+        return self._doc_workdir(index) / "editable.txt"
+
+    def _orig_path(self, index):
+        p = pathlib.Path(self.document_list[index])
+        return self._doc_workdir(index) / ("input.orig" + p.suffix)
+
+    def _load_editable_for_current(self):
+        # Load editable.txt if exists, else try to extract via odfpy if available, else placeholder
+        epath = self._editable_path(self.current_index)
+        if epath.exists():
+            try:
+                txt = epath.read_text(encoding="utf-8")
+                self.preview_editor.blockSignals(True)
+                self.preview_editor.setPlainText(txt)
+                self.preview_editor.blockSignals(False)
+                return
+            except Exception:
+                pass
+        # Try odfpy extraction if available and original exists
+        orig = self._orig_path(self.current_index)
+        if orig.exists() and ODFPY_AVAILABLE and orig.suffix.lower() == ".odt":
+            try:
+                doc = odf_load(str(orig))
+                paragraphs = []
+                for p in doc.getElementsByType(odf_text.P):
+                    text_content = ""
+                    for n in p.childNodes:
+                        if n.nodeType == n.TEXT_NODE:
+                            text_content += n.data
+                    if text_content.strip():
+                        paragraphs.append(text_content)
+                text_joined = "\n\n".join(paragraphs) if paragraphs else ""
+                if text_joined.strip():
+                    self.preview_editor.blockSignals(True)
+                    self.preview_editor.setPlainText(text_joined)
+                    self.preview_editor.blockSignals(False)
+                    # also save to editable for persistence
+                    try:
+                        epath.parent.mkdir(parents=True, exist_ok=True)
+                        epath.write_text(text_joined, encoding="utf-8")
+                    except Exception:
+                        pass
+                    return
+            except Exception:
+                pass
+        # Fallback placeholder
+        self.preview_editor.blockSignals(True)
+        self.preview_editor.setPlainText(f"{self.labels.get('preview_label','Anteprima')}\n\n{os.path.basename(self.document_list[self.current_index])}")
+        self.preview_editor.blockSignals(False)
 
     def on_doc_selection_changed(self):
         row = self.docs_listwidget.currentRow()
@@ -268,20 +379,32 @@ class MainWindow(QMainWindow):
         if self.document_list:
             self.set_selected_index((self.current_index + 1) % len(self.document_list))
 
-    def upload_files(self):
-        files, _ = QFileDialog.getOpenFileNames(self, self.labels.get("upload_dialog", "Seleziona documenti ODT/ODS"), "", "Documents (*.odt *.ods)")
-        if files:
-            self.document_list = files
-            # Hide central upload button as requested
-            try:
-                self.upload_btn.setParent(None)
-            except Exception:
-                pass
-            # Show the app layout after upload
-            self.show_app_layout_after_upload()
+    # Preview editing / autosave logic
+    def _on_preview_text_changed(self):
+        # restart debounce timer on every change
+        if self._save_timer.isActive():
+            self._save_timer.stop()
+        self._save_timer.start(self.save_debounce_ms)
+
+    def _perform_autosave(self):
+        # write preview content to editable.txt for current document
+        try:
+            idx = self.current_index
+            epath = self._editable_path(idx)
+            epath.parent.mkdir(parents=True, exist_ok=True)
+            content = self.preview_editor.toPlainText()
+            epath.write_text(content, encoding="utf-8")
+            # show transient saved indicator
+            self._show_saved_indicator()
+        except Exception:
+            pass
+
+    def _show_saved_indicator(self):
+        self.save_status_label.setText(self.labels.get("status_saved", "Salvato"))
+        # clear after 1.4s
+        QTimer.singleShot(1400, lambda: self.save_status_label.setText(""))
 
     def toggle_language(self):
-        # Toggle IT/EN
         self.language = "en" if self.lang_toggle.isChecked() else "it"
         labels_file = f"lang/labels_{self.language}.json"
         try:
@@ -290,36 +413,25 @@ class MainWindow(QMainWindow):
         except Exception:
             with open("lang/labels_en.json", encoding="utf-8") as f:
                 self.labels = json.load(f)
-
-        # Update UI texts
         self.setWindowTitle(self.labels.get("app_title", "Document Converter"))
-        # upload button text if it's still present
         if hasattr(self, "upload_btn") and self.upload_btn is not None:
             self.upload_btn.setText(self.labels.get("upload_btn", "Carica documenti"))
-
-        # Update theme toggle labels if changed language
         theme_on = self.labels.get("theme_on", "Scuro")
         theme_off = self.labels.get("theme_off", "Chiaro")
         self.theme_toggle.text_on = theme_on
         self.theme_toggle.text_off = theme_off
         self.theme_toggle.update_text()
-
-        # Update top bar labels
         self.lang_label_widget.setText(self.labels.get("language_label", "Lingua:"))
         self.theme_label_widget.setText(self.labels.get("theme_label", "Tema:"))
-
-        # Update button labels and preview/title if layout present
+        # update buttons & content if present
         btn_keys = ["btn_interpret", "btn_compile", "btn_back", "btn_delete", "btn_save"]
         for i, btn in enumerate(getattr(self, "tool_buttons", [])):
             k = btn_keys[i] if i < len(btn_keys) else None
             if k:
                 btn.setText(self.labels.get(k, btn.text()))
-
         if hasattr(self, "title_value") and self.document_list:
-            # refresh title and preview texts if necessary
             self.set_selected_index(self.current_index)
 
     def toggle_theme(self):
         self.theme = "dark" if self.theme_toggle.isChecked() else "light"
-        # Update style
         self.setStyleSheet(self.get_stylesheet())
