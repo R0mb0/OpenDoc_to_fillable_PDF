@@ -1,8 +1,13 @@
-# utils/logging.py
+# Application/utils/logging.py
 import logging
 from pathlib import Path
 
 def setup_logger(work_root: str = "work", name: str = "docconv"):
+    """
+    Setup a single logger used across the application.
+    Creates work_root if missing and writes a debug.log file there.
+    Returns the configured logger.
+    """
     Path(work_root).mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger(name)
     if logger.handlers:

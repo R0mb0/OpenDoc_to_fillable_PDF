@@ -1,10 +1,13 @@
 import sys
 import locale
 import json
-import sys
+from pathlib import Path
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QPalette, QColor
+from utils.logging import setup_logger
+import logging
 
+# UI import deferred until after logger setup
 def detect_language():
     lang, _ = locale.getdefaultlocale()
     if lang and lang.startswith("it"):
@@ -27,30 +30,9 @@ def luminance_from_color(qcolor: QColor) -> float:
     return lum * 255
 
 def detect_theme(app: QApplication) -> str:
-    # Platform-specific detection first
-    if sys.platform == "win32":
-        try:
-            import winreg
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                                 r"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize")
-            val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
-            winreg.CloseKey(key)
-            # AppsUseLightTheme == 1 -> light theme, 0 -> dark
-            return "light" if val == 1 else "dark"
-        except Exception:
-            # fallback to palette
-            pass
-    elif sys.platform == "darwin":
-        try:
-            import subprocess
-            p = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True, text=True)
-            if p.returncode == 0 and "Dark" in p.stdout:
-                return "dark"
-        except Exception:
-            pass
-
-    # Fallback using Qt palette luminance
+    import sys
     try:
+        from PyQt5.QtGui import QPalette
         palette = app.palette()
         bg = palette.color(QPalette.Window)
         lum = luminance_from_color(bg)
@@ -59,19 +41,38 @@ def detect_theme(app: QApplication) -> str:
         return "light"
 
 def load_labels(language):
+    # Resolve path relative to this file to be robust to cwd
+    base = Path(__file__).resolve().parent
+    lang_file = base / "lang" / f"labels_{language}.json"
+    if not lang_file.exists():
+        lang_file = base / "lang" / "labels_en.json"
     try:
-        with open(f"lang/labels_{language}.json", encoding="utf-8") as f:
-            return json.load(f)
+        return json.loads(lang_file.read_text(encoding="utf-8"))
     except Exception:
-        with open("lang/labels_en.json", encoding="utf-8") as f:
-            return json.load(f)
+        # fallback to a minimal dictionary to avoid crashes
+        try:
+            return json.loads((base / "lang" / "labels_en.json").read_text(encoding="utf-8"))
+        except Exception:
+            return {}
 
 if __name__ == "__main__":
+    # Prepare application and central logger
+    # Create QApplication early so detect_theme can inspect palette
     app = QApplication(sys.argv)
+
+    # Setup logger (writes to Application/work/debug.log)
+    setup_logger(work_root=str(Path(__file__).resolve().parent / "work"))
+    logger = logging.getLogger("docconv")
+    logger.info("Starting application")
+
     language = detect_language()
     theme = detect_theme(app)
     labels = load_labels(language)
+
+    # Import mainwindow after logger and labels ready
     from ui.mainwindow import MainWindow
+
     window = MainWindow(labels, language, theme)
     window.show()
+    logger.info("Main window shown (language=%s theme=%s)", language, theme)
     sys.exit(app.exec_())

@@ -1,0 +1,8 @@
+PyQt5>=5.15,<6
+odfpy>=1.4.1
+Jinja2>=3.0
+Pygments>=2.11
+PyPDF2>=3.0
+# optional:
+# PyMuPDF>=1.22.0
+# requests>=2.28

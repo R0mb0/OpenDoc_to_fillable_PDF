@@ -1,19 +1,21 @@
-# ui/mainwindow.py
+# Application/ui/mainwindow.py
 """
-Lightweight MainWindow that wires DocumentManager, Extractor and PreviewEditor.
-This file is intentionally minimal and delegates behavior to modules under core/ and ui/.
-Replace the previous monolithic mainwindow.py with this one and keep expanding modules independently.
+MainWindow snella che si appoggia sui moduli core/ e ui/.
+Usa il logger centrale configurato in Application/main.py (utils.logging).
 """
 from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog, QFrame, QSizePolicy
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 import json
 import os
+import logging
 
 from core.document_manager import DocumentManager
 from core import extractor
 from ui.preview import PreviewEditor
 from ui.widgets import ToggleSwitch, StyledButton
+
+logger = logging.getLogger("docconv")
 
 class MainWindow(QMainWindow):
     def __init__(self, labels, language, theme):
@@ -25,7 +27,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 600)
 
         # core components
-        self.docmgr = DocumentManager(work_root="work")
+        self.docmgr = DocumentManager(work_root="Application/work")
 
         # UI components
         self._build_ui()
@@ -35,6 +37,8 @@ class MainWindow(QMainWindow):
         self.docmgr.current_changed.connect(self.on_current_changed)
         # preview autosave callback will use docmgr.save_editable_for_current
         self.preview.set_autosave_callback(self._on_preview_autosave)
+
+        logger.info("MainWindow initialized")
 
     def _build_ui(self):
         self.central_widget = QWidget()
@@ -113,12 +117,13 @@ class MainWindow(QMainWindow):
         self._set_main_area_visible(False)
 
     def _set_main_area_visible(self, visible: bool):
+        # set visibility recursively for layouts inside main_area
         for i in range(self.main_area.count()):
             item = self.main_area.itemAt(i)
             if item.layout():
-                item.widget = None
-                for j in range(item.layout().count()):
-                    w = item.layout().itemAt(j).widget()
+                layout = item.layout()
+                for j in range(layout.count()):
+                    w = layout.itemAt(j).widget()
                     if w:
                         w.setVisible(visible)
             else:
@@ -129,17 +134,17 @@ class MainWindow(QMainWindow):
     def on_upload_clicked(self):
         files, _ = QFileDialog.getOpenFileNames(self, self.labels.get("upload_dialog","Seleziona documenti ODT/ODS"), "", "Documents (*.odt *.ods)")
         if files:
+            logger.info("User selected %d files", len(files))
             # delegate to DocumentManager
             self.docmgr.load_files(files)
             # hide start area and show main layout
             try:
-                # remove upload widgets
                 while self.start_box.count():
                     it = self.start_box.takeAt(0)
                     if it and it.widget():
                         it.widget().setParent(None)
             except Exception:
-                pass
+                logger.exception("Error while removing start widgets")
             self._set_main_area_visible(True)
 
     def on_documents_changed(self, docs):
@@ -147,6 +152,7 @@ class MainWindow(QMainWindow):
         if docs:
             self.title_value.setText(os.path.basename(docs[0]))
             self.page_label.setText("1/{}".format(len(docs)))
+            logger.debug("Documents changed: %d entries", len(docs))
 
     def on_current_changed(self, idx):
         # load current document via extractor and/or editable.txt and set preview text
@@ -156,24 +162,31 @@ class MainWindow(QMainWindow):
         # first try editable saved content
         loaded = self.docmgr.load_editable_for_current()
         if loaded:
+            logger.debug("Loaded editable content for index %d (len=%d)", idx, len(loaded))
             self.preview.load_text(loaded)
             return
         # else try extractor (odfpy or unzip fallback)
         extracted = extractor.extract_text_from_odt(path)
         if extracted:
+            logger.info("Extracted text (len=%d) for %s", len(extracted), path)
             self.preview.load_text(extracted)
             # persist extracted as editable for later
             try:
                 self.docmgr.save_editable_for_current(extracted)
             except Exception:
-                pass
+                logger.exception("Failed to persist extracted text")
             return
         # fallback placeholder
         self.preview.load_text(self.labels.get("preview_label","Anteprima") + "\n\n" + os.path.basename(path))
+        logger.warning("No extracted content, showing placeholder for %s", path)
 
     def _on_preview_autosave(self, text):
         # called by PreviewEditor autosave callback: persist via DocumentManager
         try:
-            self.docmgr.save_editable_for_current(text)
+            ok = self.docmgr.save_editable_for_current(text)
+            if ok:
+                logger.debug("Autosaved editable for current doc (len=%d)", len(text))
+            else:
+                logger.warning("Autosave returned False")
         except Exception:
-            pass
+            logger.exception("Autosave failed")
