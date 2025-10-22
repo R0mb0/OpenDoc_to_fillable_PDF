@@ -2,7 +2,7 @@ import sys
 import locale
 import json
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtGui import QPalette
+from PyQt5.QtGui import QPalette, QColor
 from ui.mainwindow import MainWindow
 
 def detect_language():
@@ -11,11 +11,31 @@ def detect_language():
         return "it"
     return "en"
 
-def detect_theme(app):
-    palette = app.palette()
-    # Try to detect dark theme (if background is dark)
-    bg_color = palette.color(QPalette.Window).lightness()
-    return "dark" if bg_color < 128 else "light"
+def luminance_from_color(qcolor: QColor) -> float:
+    # Perceived luminance (0..255)
+    r = qcolor.red() / 255.0
+    g = qcolor.green() / 255.0
+    b = qcolor.blue() / 255.0
+    # linearize sRGB
+    def lin(c):
+        return c/12.92 if c <= 0.04045 else (( (c+0.055)/1.055) ** 2.4)
+    r_l = lin(r)
+    g_l = lin(g)
+    b_l = lin(b)
+    # Rec. 709 luminance
+    lum = 0.2126 * r_l + 0.7152 * g_l + 0.0722 * b_l
+    # scale to 0..255
+    return lum * 255
+
+def detect_theme(app: QApplication) -> str:
+    try:
+        palette = app.palette()
+        bg = palette.color(QPalette.Window)
+        lum = luminance_from_color(bg)
+        # threshold: if luminance lower than mid -> dark theme
+        return "dark" if lum < 128 else "light"
+    except Exception:
+        return "light"
 
 def load_labels(language):
     try:

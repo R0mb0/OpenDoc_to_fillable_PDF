@@ -1,21 +1,23 @@
-/* Toggle Switch Material/iOS Style */
-QPushButton[checkable="true"] {
-    background: #cfd8dc;
+/* Toggle Switch Material/iOS Style for checkable QPushButton (#toggle_switch) */
+QPushButton#toggle_switch {
+    background: #dfe6ea;
     border-radius: 16px;
-    min-width: 60px;
+    min-width: 72px;
     min-height: 28px;
-    padding: 2px 12px;
-    color: #444;
-    font-weight: bold;
-    border: 2px solid #b0bec5;
-    transition: background 0.2s;
+    padding: 0 8px;
+    color: #333;
+    font-weight: 600;
+    border: 1px solid #bfc9ce;
 }
-QPushButton[checkable="true"]:checked {
+QPushButton#toggle_switch:checked {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #42a5f5, stop:1 #478ed1);
+        stop:0 #42a5f5, stop:1 #2b7fc8);
     color: #fff;
-    border: 2px solid #1976d2;
+    border: 1px solid #1976d2;
 }
-QPushButton[checkable="true"]:hover {
-    border: 2px solid #42a5f5;
+QPushButton#toggle_switch:hover {
+    border-color: #6faaf0;
+}
+QPushButton#toggle_switch:focus {
+    outline: none;
 }
