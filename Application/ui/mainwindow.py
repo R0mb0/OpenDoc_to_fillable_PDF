@@ -71,8 +71,8 @@ class MainWindow(QMainWindow):
             qss_content = ""
         extra = """
         QPushButton { padding: 8px 12px; border-radius: 12px; }
-        QPushButton#arrow_btn { min-width: 52px; min-height: 40px; padding: 0 10px; font-size: 16px; border-radius: 12px; }
-        QPushButton.tool-button { min-width: 180px; min-height: 46px; font-size: 13px; border-radius: 14px; padding: 10px 14px; }
+        QPushButton#arrow_btn { min-width: 48px; min-height: 40px; padding: 0 10px; font-size: 18px; border-radius: 12px; }
+        QPushButton.tool-button { min-width: 150px; min-height: 44px; font-size: 15px; border-radius: 14px; padding: 8px 12px; }
         QTextEdit#preview_editor { border-radius: 12px; background: #ffffff; padding: 12px; }
         QLabel.preview-area-placeholder { color: rgba(0,0,0,0.6); }
         QLabel#save_status { font-size: 11px; color: #8fb; padding-left: 6px; }
@@ -141,10 +141,10 @@ class MainWindow(QMainWindow):
     def init_start_layout(self):
         self.start_layout = QVBoxLayout()
         self.upload_btn = QPushButton(self.labels.get("upload_btn", "Carica documenti"))
-        self.upload_btn.setFont(QFont("Arial", 16))
+        self.upload_btn.setFont(QFont("Arial", 18))
         self.upload_btn.clicked.connect(self.upload_files)
-        self.upload_btn.setFixedWidth(280)
-        self.upload_btn.setFixedHeight(48)
+        self.upload_btn.setFixedWidth(240)  # ridotto per pulsante più piccolo
+        self.upload_btn.setFixedHeight(44)
         self.start_layout.addStretch()
         self.start_layout.addWidget(self.upload_btn, alignment=Qt.AlignCenter)
         self.start_layout.addStretch()
@@ -173,10 +173,11 @@ class MainWindow(QMainWindow):
         self.prev_btn.setObjectName("arrow_btn")
         self.next_btn = QPushButton(">")
         self.next_btn.setObjectName("arrow_btn")
-        self.prev_btn.setFixedSize(56, 44)
-        self.next_btn.setFixedSize(56, 44)
-        self.prev_btn.setFont(QFont("Arial", 16))
-        self.next_btn.setFont(QFont("Arial", 16))
+        # dimensioni pulsanti freccia leggermente ridotte, font aumentato
+        self.prev_btn.setFixedSize(48, 40)
+        self.next_btn.setFixedSize(48, 40)
+        self.prev_btn.setFont(QFont("Arial", 18))
+        self.next_btn.setFont(QFont("Arial", 18))
         self.prev_btn.clicked.connect(self.on_prev)
         self.next_btn.clicked.connect(self.on_next)
         self.page_indicator = QLabel("")
@@ -229,9 +230,9 @@ class MainWindow(QMainWindow):
             b = QPushButton(lbl)
             b.setObjectName("tool_button")
             b.setProperty("class", "tool-button")
-            b.setFixedWidth(180)
-            b.setFixedHeight(46)
-            b.setFont(QFont("Arial", 13))  # adjusted font for better readability
+            b.setFixedWidth(150)   # leggermente più piccolo
+            b.setFixedHeight(44)   # leggermente più piccolo
+            b.setFont(QFont("Arial", 15))  # font aumentato per leggibilità
             col_tools.addWidget(b)
             self.tool_buttons.append(b)
             col_tools.addSpacing(8)
