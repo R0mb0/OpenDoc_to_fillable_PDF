@@ -2,6 +2,9 @@
 """
 MainWindow snella che si appoggia sui moduli core/ e ui/.
 Ora applica un stylesheet basato sul tema (dark/light) e carica l'asset toggle_switch.qss.
+Correzione: _set_main_area_visible è stata resa ricorsiva così che tutti i widget nelle
+sottolayout vengano nascosti/mostrati correttamente nella pagina iniziale.
+I pulsanti di navigazione (<, >) restano nascosti finché non viene caricato almeno un documento.
 """
 from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog, QFrame, QSizePolicy
 from PyQt5.QtCore import Qt
@@ -91,6 +94,11 @@ class MainWindow(QMainWindow):
         self.prev_btn = StyledButton("<")
         self.next_btn = StyledButton(">")
         self.page_label = QLabel("")
+
+        # ensure navigation buttons are hidden until documents exist
+        self.prev_btn.setVisible(False)
+        self.next_btn.setVisible(False)
+
         preview_bar.addWidget(self.prev_btn)
         preview_bar.addWidget(self.page_label, stretch=1)
         preview_bar.addWidget(self.next_btn)
@@ -128,16 +136,33 @@ class MainWindow(QMainWindow):
         self.layout_main.addLayout(self.main_area)
         self._set_main_area_visible(False)
 
+    def _set_layout_visible_recursive(self, layout, visible: bool):
+        """
+        Recursively set visibility for all widgets inside a layout.
+        This ensures nested layouts' widgets (like prev/next inside preview_bar)
+        are also hidden/shown.
+        """
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if item is None:
+                continue
+            # if the item is a layout, recurse
+            child_layout = item.layout()
+            if child_layout:
+                self._set_layout_visible_recursive(child_layout, visible)
+            else:
+                w = item.widget()
+                if w:
+                    w.setVisible(visible)
+
     def _set_main_area_visible(self, visible: bool):
         # set visibility recursively for layouts inside main_area
         for i in range(self.main_area.count()):
             item = self.main_area.itemAt(i)
+            if item is None:
+                continue
             if item.layout():
-                layout = item.layout()
-                for j in range(layout.count()):
-                    w = layout.itemAt(j).widget()
-                    if w:
-                        w.setVisible(visible)
+                self._set_layout_visible_recursive(item.layout(), visible)
             else:
                 w = item.widget()
                 if w:
@@ -189,6 +214,7 @@ class MainWindow(QMainWindow):
                         it.widget().setParent(None)
             except Exception:
                 logger.exception("Error while removing start widgets")
+            # show main area (this will also show nested widgets via recursive helper)
             self._set_main_area_visible(True)
 
     def on_documents_changed(self, docs):
@@ -197,6 +223,10 @@ class MainWindow(QMainWindow):
             self.title_value.setText(os.path.basename(docs[0]))
             self.page_label.setText("1/{}".format(len(docs)))
             logger.debug("Documents changed: %d entries", len(docs))
+            # navigation buttons make sense only when documents exist: show/enable them
+            self.prev_btn.setVisible(True)
+            self.next_btn.setVisible(True)
+            # if you want to enable/disable based on index you can do that here
 
     def on_current_changed(self, idx):
         # load current document via extractor and/or editable.txt and set preview text
