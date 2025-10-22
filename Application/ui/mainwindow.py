@@ -9,6 +9,8 @@ import json
 import os
 import shutil
 import pathlib
+import zipfile
+import xml.etree.ElementTree as ET
 
 # Optional odfpy import for basic text extraction from .odt
 try:
@@ -305,7 +307,52 @@ class MainWindow(QMainWindow):
         p = pathlib.Path(self.document_list[index])
         return self._doc_workdir(index) / ("input.orig" + p.suffix)
 
+    def _extract_text_from_odt_by_unzip(self, odt_path):
+        """
+        Fallback extractor: unzip the .odt and parse content.xml with ElementTree,
+        collecting text:p contents. Returns the extracted plain text or None.
+        """
+        try:
+            with zipfile.ZipFile(str(odt_path), 'r') as z:
+                if 'content.xml' not in z.namelist():
+                    return None
+                with z.open('content.xml') as f:
+                    tree = ET.parse(f)
+                    root = tree.getroot()
+                    # namespace for text
+                    ns = {'text': 'urn:oasis:names:tc:opendocument:xmlns:text:1.0'}
+                    paragraphs = []
+                    for p in root.findall('.//text:p', ns):
+                        # Collect text including nested spans
+                        parts = []
+                        if p.text and p.text.strip():
+                            parts.append(p.text)
+                        for node in p:
+                            if node.text and node.text.strip():
+                                parts.append(node.text)
+                            if node.tail and node.tail.strip():
+                                parts.append(node.tail)
+                        paragraph = ''.join(parts).strip()
+                        if paragraph:
+                            paragraphs.append(paragraph)
+                    if paragraphs:
+                        return '\n\n'.join(paragraphs)
+        except Exception:
+            return None
+        return None
+
     def _load_editable_for_current(self):
+        """
+        Load editable content into preview_editor:
+         - if editable.txt exists, load it
+         - else if original exists:
+            - try odfpy extraction (if available)
+            - else unzip and parse content.xml (fallback)
+         - otherwise show placeholder
+        Saves extracted text into editable.txt for persistence.
+        """
+        if not self.document_list:
+            return
         epath = self._editable_path(self.current_index)
         if epath.exists():
             try:
@@ -316,7 +363,11 @@ class MainWindow(QMainWindow):
                 return
             except Exception:
                 pass
+
         orig = self._orig_path(self.current_index)
+        extracted_text = None
+
+        # Try odfpy first (if installed)
         if orig.exists() and ODFPY_AVAILABLE and orig.suffix.lower() == ".odt":
             try:
                 doc = odf_load(str(orig))
@@ -324,26 +375,54 @@ class MainWindow(QMainWindow):
                 for p in doc.getElementsByType(odf_text.P):
                     text_content = ""
                     for n in p.childNodes:
-                        if n.nodeType == n.TEXT_NODE:
-                            text_content += n.data
+                        # TEXT_NODE is numerically 3 usually, but better to check attribute
+                        try:
+                            if getattr(n, "nodeType", None) == n.TEXT_NODE:
+                                text_content += n.data
+                            elif hasattr(n, "toString"):
+                                text_content += str(n.toString())
+                            elif hasattr(n, "data"):
+                                text_content += str(n.data)
+                        except Exception:
+                            # best-effort: try to convert to string
+                            try:
+                                text_content += str(n)
+                            except Exception:
+                                pass
                     if text_content.strip():
-                        paragraphs.append(text_content)
-                text_joined = "\n\n".join(paragraphs) if paragraphs else ""
-                if text_joined.strip():
-                    self.preview_editor.blockSignals(True)
-                    self.preview_editor.setPlainText(text_joined)
-                    self.preview_editor.blockSignals(False)
-                    try:
-                        epath.parent.mkdir(parents=True, exist_ok=True)
-                        epath.write_text(text_joined, encoding="utf-8")
-                    except Exception:
-                        pass
-                    return
+                        paragraphs.append(text_content.strip())
+                if paragraphs:
+                    extracted_text = "\n\n".join(paragraphs)
+            except Exception:
+                extracted_text = None
+
+        # Fallback: unzip and parse content.xml directly (works even if odfpy missing)
+        if extracted_text is None and orig.exists() and orig.suffix.lower() == ".odt":
+            extracted_text = self._extract_text_from_odt_by_unzip(orig)
+
+        # If we have extracted text, populate editor and save
+        if extracted_text:
+            try:
+                self.preview_editor.blockSignals(True)
+                self.preview_editor.setPlainText(extracted_text)
+                self.preview_editor.blockSignals(False)
+                # persist to editable.txt
+                try:
+                    epath.parent.mkdir(parents=True, exist_ok=True)
+                    epath.write_text(extracted_text, encoding="utf-8")
+                except Exception:
+                    pass
+                return
             except Exception:
                 pass
-        self.preview_editor.blockSignals(True)
-        self.preview_editor.setPlainText(f"{self.labels.get('preview_label','Anteprima')}\n\n{os.path.basename(self.document_list[self.current_index])}")
-        self.preview_editor.blockSignals(False)
+
+        # Final fallback: placeholder with filename
+        try:
+            self.preview_editor.blockSignals(True)
+            self.preview_editor.setPlainText(f"{self.labels.get('preview_label','Anteprima')}\n\n{os.path.basename(self.document_list[self.current_index])}")
+            self.preview_editor.blockSignals(False)
+        except Exception:
+            pass
 
     def on_prev(self):
         if self.document_list:
